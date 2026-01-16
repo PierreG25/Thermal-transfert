@@ -19,13 +19,13 @@ def solve_poisson_psi(psi, w, dx, dy, alpha_sor, tol):
 def residu_SOR(psi, w, dx, dy, Ny, Nx):
     mat_residu = np.zeros_like(psi)
 
-    mat_residu[1:Ny-1, 1:Nx-1] = (
-        (psi[1:Ny-1, 2:Nx] - 2.0*psi[1:Ny-1, 1:Nx-1] + psi[1:Ny-1, 0:Nx-2]) * (dy**2)
-        + (psi[2:Ny, 1:Nx-1] - 2.0*psi[1:Ny-1, 1:Nx-1] + psi[0:Ny-2, 1:Nx-1]) * (dx**2)
-        + (dx**2 * dy**2) * w[1:Ny-1, 1:Nx-1]
+    mat_residu[1:-1, 1:-1] = (
+        (psi[1:-1, 2:] - 2.0*psi[1:-1, 1:-1] + psi[1:-1, :-2]) * (dy**2)
+        + (psi[2:, 1:-1] - 2.0*psi[1:-1, 1:-1] + psi[:-2, 1:-1]) * (dx**2)
+        + (dx**2 * dy**2) * w[1:-1, 1:-1]
     )
 
-    return np.max(np.abs(mat_residu[1:Ny-1, 1:Nx-1]))
+    return np.max(np.abs(mat_residu[1:-1, 1:-1]))
 
 def calcul_matrice_psi(psi, w, dx, dy, alpha_sor, Ny, Nx):
     for j in range(1, Ny-1):
