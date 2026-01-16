@@ -95,5 +95,7 @@ plt.show()
 
 print(get_average_nusselt(T, dx))
 
-plt.matshow(T, cmap='hot', origin='lower')
+fig, ax = plt.subplots()
+im = ax.contour(T, levels = 30)
+plt.colorbar(im, ax=ax, label='Température')
 plt.show()
