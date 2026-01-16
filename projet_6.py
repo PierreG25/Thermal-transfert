@@ -10,10 +10,10 @@ from components.computation.compute_velocity import *
 from components.computation.compute_nusselt import *
 from components.computation.solve_vorticity import *
 
-nx, ny = 41, 41
+nx, ny = 31, 31
 Lx, Ly = 1.0, 1.0
 dx, dy = Lx/(nx-1), Ly/(ny-1)
-dt = 1e-4
+dt = 1e-3
 
 U0 = 1e-3  # Vitesse paroi supérieure
 
@@ -28,7 +28,7 @@ Ri = Ra / (Re**2 * Pr)
 
 alpha_sor = 1.74
 tol_sor = 1e-6
-tol_steady_state = 1e-3
+tol_steady_state = 1e-4
 max_iter = 10000
 
 T = np.zeros((nx, ny))
@@ -94,3 +94,6 @@ plt.grid()
 plt.show()
 
 print(get_average_nusselt(T, dx))
+
+plt.matshow(T, cmap='hot', origin='lower')
+plt.show()
