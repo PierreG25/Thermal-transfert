@@ -10,7 +10,7 @@ from components.computation.compute_velocity import *
 from components.computation.compute_nusselt import *
 from components.computation.solve_vorticity import *
 
-nx, ny = 41, 41
+nx, ny = 31, 31
 Lx, Ly = 1.0, 1.0
 dx, dy = Lx/(nx-1), Ly/(ny-1)
 dt = 1e-4
@@ -96,3 +96,4 @@ plt.grid()
 plt.show()
 
 print(get_average_nusselt(T, dx))
+print(Re)
