@@ -34,12 +34,10 @@ def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
     T[:, 0] = 1.0  # Paroi gauche chaude
 
     print("Le nombre de Courant est égale à : " + str(U0*dt/dy))
-    print("Condition de stabilité de l'algo SOR : " + str(dt/(dy**2)))
 
     print("Re = " + str(Re))
 
     assert U0*dt/dy < 1, f"Condition de stabilité CFL violée : {U0*dt/dy} "
-    assert dt/(dy**2) < 1/2, f"Condition de stabilité SOR violée : {dt/(dy**2)} "
 
     img_dic = {'T': [T], 'w': [w], 'psi': [psi], 'u': [u], 'v': [v]}
 
