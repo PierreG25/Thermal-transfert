@@ -24,7 +24,7 @@ def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
 
     alpha_sor = 1.74
     tol_sor = 1e-6
-    tol_steady_state = 1e-3
+    tol_steady_state = 1e-5
     max_iter = 10000
 
     T = np.zeros((nx, ny))
@@ -90,4 +90,4 @@ def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
     #plt.show()
 
     Nu = get_average_nusselt(T, dx)
-    return Nu, Re
+    return Nu, Re, T.copy()          
