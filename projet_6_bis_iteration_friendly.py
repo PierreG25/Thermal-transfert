@@ -24,7 +24,7 @@ def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
 
     alpha_sor = 1.74
     tol_sor = 1e-6
-    tol_steady_state = 1e-5
+    tol_steady_state = 1e-4
     max_iter = 10000
 
     T = np.zeros((nx, ny))
