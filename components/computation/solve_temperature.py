@@ -16,9 +16,6 @@ def solve_adi_T(T, u, v, diff_coeff, dt, dx, dy):
     Fx = (diff_coeff * dt) / (2 * dx**2)
     Fy = (diff_coeff * dt) / (2 * dy**2)
 
-    beta_x = dt / (4 * dx)
-    
-
     for j in range(Ny):
 
         Cx = u[j, :] * dt / (4 * dx)
@@ -36,6 +33,13 @@ def solve_adi_T(T, u, v, diff_coeff, dt, dx, dy):
         else:
             d = T[j, 1:-1] + Fy*(T[j+1, 1:-1] - 2*T[j, 1:-1] + T[j-1, 1:-1]) \
                 - (Cy[1:-1])*(T[j+1, 1:-1] - T[j-1, 1:-1])
+
+        a_ext = -Fx - Cx[1]
+        d[0] -= a_ext * T_star[j, 0]
+
+        # Bord droit (i=Nx-1) : T_star[j, -1] = 0.0
+        c_ext = -Fx + Cx[-2]
+        d[-1] -= c_ext * T_star[j, -1]
 
         T_star[j, 1:-1] = solve_thomas(a, b, c, d)
 

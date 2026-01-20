@@ -5,8 +5,6 @@ def solve_adi_w(w, T, psi, u, v, diff_coeff, source_coeff, dt, dx, dy, U0):
     Ny, Nx = w.shape
     w_new = w.copy()
     s_half = (dt / 2.0) * source_coeff
-    gamma_x = (diff_coeff * dt) / (2 * dx**2)
-    beta_x = dt / (4 * dx)
     
     # --- Étape 1 : X-Implicite ---
     w_star = w.copy()
@@ -14,9 +12,6 @@ def solve_adi_w(w, T, psi, u, v, diff_coeff, source_coeff, dt, dx, dy, U0):
     w_star[:, -1] = -2 * psi[:, -2] / dx**2
     
     # Coeffs
-    beta_x = dt / (4 * dx)
-    beta_y = dt / (4 * dy)
-
     Fx = (diff_coeff * dt) / (2 * dx**2)
     Fy = (diff_coeff * dt) / (2 * dy**2)
 

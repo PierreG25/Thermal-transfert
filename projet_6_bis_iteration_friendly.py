@@ -10,18 +10,13 @@ from components.computation.compute_velocity import *
 from components.computation.compute_nusselt import *
 from components.computation.solve_vorticity import *
 
-def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
+def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
     
     dx, dy = Lx/(nx-1), Ly/(ny-1)
 
-
-    rho = 1 # Air
-    mu = 1e-5 # Air
     Pr = 0.71
-    Re = rho * U0 * (Lx + Ly) / (2 * mu)
+    U0 = Re * nu /(Lx+Ly)*2
     Ri = Ra / (Re**2 * Pr)
-
-
     alpha_sor = 1.74
     tol_sor = 1e-6
     tol_steady_state = 1e-4
@@ -33,23 +28,14 @@ def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
     u, v = get_velocity(psi, dx, dy, U0)
     T[:, 0] = 1.0  # Paroi gauche chaude
 
-    print("Le nombre de Courant est égale à : " + str(U0*dt/dy))
-
-    print("Re = " + str(Re))
-
-    assert U0*dt/dy < 1, f"Condition de stabilité CFL violée : {U0*dt/dy} "
-
     img_dic = {'T': [T], 'w': [w], 'psi': [psi], 'u': [u], 'v': [v]}
 
+    res_w = []
+    res_T = []
+    res_w = []
+    res_T = []
+
     n = 0
-
-    res_w = []
-    res_psi = []
-    res_T = []
-    res_w = []
-    res_T = []
-
-
     while n <= max_iter:
         T_new = solve_adi_T(T, u, v, 1/(Re*Pr), dt, dx, dy)
         
@@ -79,15 +65,4 @@ def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
         T, w, psi, u, v = T_new, w_new, psi_new, u_new, v_new
         n += 1
 
-    #plt.plot(res_T, label='Résidu Température')
-    #plt.plot(res_w, label='Résidu Vorticité')
-    #plt.yscale('log')
-    #plt.xlabel('Itérations')
-    #plt.ylabel('Résidu')
-    #plt.legend()
-    #plt.title('Convergence des résidus')
-    #plt.grid()
-    #plt.show()
-
-    Nu = get_average_nusselt(T, dx)
-    return Nu, Re, T.copy()          
+    return U0, img_dic      
