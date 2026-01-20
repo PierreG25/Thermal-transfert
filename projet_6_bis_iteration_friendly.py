@@ -31,7 +31,8 @@ def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
     w = np.zeros((nx, ny))
     psi = np.zeros((nx, ny))
     u, v = get_velocity(psi, dx, dy, U0)
-    T[:, 0] = 1.0  # Paroi gauche chaude
+    T[:, 0] = 0.0  # Paroi gauche chaude
+
 
     print("Le nombre de Courant est égale à : " + str(U0*dt/dy))
 
@@ -89,5 +90,7 @@ def global_resolution(nx, ny, Lx, Ly, dt, U0, Ra):
     #plt.grid()
     #plt.show()
 
+
     Nu = get_average_nusselt(T, dx)
-    return Nu, Re, T.copy()          
+    return Nu, Re, T.copy(), psi.copy()     
+
