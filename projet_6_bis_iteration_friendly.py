@@ -8,6 +8,7 @@ from components.computation.solve_psi import *
 from components.computation.solve_temperature import *
 from components.computation.compute_velocity import *
 from components.computation.solve_vorticity import *
+from components.computation.compute_nusselt import *
 
 def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
     
@@ -19,7 +20,8 @@ def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
     alpha_sor = 1.74
     tol_sor = 1e-6
     tol_steady_state = 1e-4
-    max_iter = 10000
+    tol_Nu = 1e-3
+    max_iter = 100000
 
     T = np.zeros((nx, ny))
     w = np.zeros((nx, ny))
@@ -33,7 +35,7 @@ def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
     res_T = []
     res_w = []
     res_T = []
-
+    res_Nu = []
     n = 0
     while n <= max_iter:
         C = max(np.max(np.abs(u)), np.max(np.abs(v))) *dt/dx
@@ -51,8 +53,11 @@ def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
 
         res_w.append(np.linalg.norm(w_new - w)/np.linalg.norm(w))
         res_T.append(np.linalg.norm(T_new - T)/np.linalg.norm(T))
+
+        Nu_h, Nu_c = get_average_nusselt(T_new, dx)
+        res_Nu.append(abs(Nu_h-Nu_c)/Nu_h)
         
-        if res_w[-1] < tol_steady_state and res_T[-1] < tol_steady_state:
+        if res_w[-1] < tol_steady_state and res_T[-1] < tol_steady_state and res_Nu[-1]<tol_Nu:
                 print(f"\nConvergence atteinte à l'itération {n} !")
                 break
 
@@ -63,11 +68,12 @@ def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
             u_save, v_save = get_velocity(psi, dx, dy, U0)
             img_dic['u'].append(u_save.copy())
             img_dic['v'].append(v_save.copy())
-            print(f"Itération {n}: Résidu w = {res_w[-1]:.2e}, Résidu T = {res_T[-1]:.2e}")
+            print(f"Itération {n}: Résidu Nu = {res_Nu[-1]:.2e}, Résidu w = {res_w[-1]:.2e}, Résidu T = {res_T[-1]:.2e}")
         
         T, w, psi, u, v = T_new, w_new, psi_new, u_new, v_new
         n += 1
 
     img_dic['res_T'] = res_T
     img_dic['res_w'] = res_w
+    img_dic['res_Nu'] = res_Nu
     return U0, img_dic      
