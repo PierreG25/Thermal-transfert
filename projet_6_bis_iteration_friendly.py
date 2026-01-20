@@ -7,7 +7,6 @@ import matplotlib as mpl
 from components.computation.solve_psi import *
 from components.computation.solve_temperature import *
 from components.computation.compute_velocity import *
-from components.computation.compute_nusselt import *
 from components.computation.solve_vorticity import *
 
 def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
@@ -20,7 +19,7 @@ def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
     alpha_sor = 1.74
     tol_sor = 1e-6
     tol_steady_state = 1e-4
-    max_iter = 100000
+    max_iter = 10000
 
     T = np.zeros((nx, ny))
     w = np.zeros((nx, ny))
@@ -37,6 +36,11 @@ def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
 
     n = 0
     while n <= max_iter:
+        C = max(np.max(np.abs(u)), np.max(np.abs(v))) *dt/dx
+        if C>1:
+            print(f" Re = {Re:.0f}, Ra = {Ra:.2e} : Condition CFL brisée à l'itération {n} : C = {C:.3f}")
+            return
+
         T_new = solve_adi_T(T, u, v, 1/(Re*Pr), dt, dx, dy)
         
         w_new = solve_adi_w(w, T_new, psi, u, v, 1/Re, Ri, dt, dx, dy, U0)
@@ -52,7 +56,6 @@ def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
                 print(f"\nConvergence atteinte à l'itération {n} !")
                 break
 
-
         if n % 10 == 0:
             img_dic['T'].append(T.copy())
             img_dic['w'].append(w.copy())
@@ -65,4 +68,6 @@ def global_resolution(nx, ny, Lx, Ly, dt, nu, Re, Ra):
         T, w, psi, u, v = T_new, w_new, psi_new, u_new, v_new
         n += 1
 
+    img_dic['res_T'] = res_T
+    img_dic['res_w'] = res_w
     return U0, img_dic      
