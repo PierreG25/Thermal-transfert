@@ -1,128 +1,183 @@
 import numpy as np
-from components.computation.thomas_algorithm import solve_thomas
+from components.computation.thomas_algorithm import solve_thomas_vectorized
 
-def solve_adi_w(w, T, psi, u, v, diff_coeff, source_coeff, dt, dx, dy, U0):
+def solve_adi_w(w, T, psi, u, v, diff_coeff, Ri, dt, dx, dy, U0, work_buffer=None):
+    """
+    Résolution ADI de la Vorticité (w).
+    Structure symétrique à la température :
+    - Étape 1 : w -> w_star (Implicite X)
+    - Étape 2 : w_star -> w_new (Implicite Y)
+    """
     Ny, Nx = w.shape
-    w_new = w.copy()
-    w_star = w.copy()
-    s_half = (dt / 2.0) * source_coeff
     
-    # Coeffs de diffusion
+    # --- 0. GESTION MÉMOIRE & CONSTANTES ---
+    if work_buffer is not None:
+        w_new = work_buffer['w_new']
+        w_star = work_buffer['w_star']
+    else:
+        w_new = np.zeros_like(w)
+        w_star = np.zeros_like(w)
+        
+    # Paramètres physiques
     Fx = (diff_coeff * dt) / (2 * dx**2)
     Fy = (diff_coeff * dt) / (2 * dy**2)
+    s_half = (dt / 2.0) * Ri  # Ri = Ra/(Pr*Re^2) pour le terme source thermique
+    r_wall = 0.5 # Facteur de relaxation aux parois (Vital pour stabilité)
+
+    # --- 1. PRÉ-CALCUL DES BORDS (THOM avec RELAXATION) ---
+    # On met à jour les murs dans w_star directement pour s'en servir comme Condition Limite (CL)
+    # Mur Gauche/Droite
+    w_star[:, 0]  = (1-r_wall)*w[:, 0]  + r_wall*(-2 * psi[:, 1] / dx**2)
+    w_star[:, -1] = (1-r_wall)*w[:, -1] + r_wall*(-2 * psi[:, -2] / dx**2)
+    # Mur Bas/Haut
+    w_star[0, :]  = (1-r_wall)*w[0, :]  + r_wall*(-2 * psi[1, :] / dy**2)
+    w_star[-1, :] = (1-r_wall)*w[-1, :] + r_wall*(-2 * (psi[-2, :] + U0 * dy) / dy**2)
     
-    # --- Étape 1 : X-Implicite ---
-    # Conditions aux limites (Thom) pour les parois verticales
-    w_star[:, 0] = -2 * psi[:, 1] / dx**2
-    w_star[:, -1] = -2 * psi[:, -2] / dx**2
+    # Note : À ce stade, w_star contient les "vieux" w à l'intérieur, et les "nouveaux" w aux bords.
+    # C'est parfait pour l'étape 1.
+
+    # ==========================================
+    # ÉTAPE 1 : X-IMPLICITE (Calcul de w_star)
+    # ==========================================
+    # On résout sur les lignes intérieures j=1..Ny-2
+    # Le système tridiagonal est de taille Nx-2 (i=1..Nx-2)
     
-    for j in range(1, Ny-1):
-        uj = u[j, 1:-1]
-        Pex_local = (np.abs(uj) * dx) / diff_coeff
-        mask_up_x = Pex_local >= 2
-        
-        # 1. Matrice X (Implicite)
-        Cx_cent = uj * dt / (4 * dx)
-        a_cent = -Fx - Cx_cent
-        b_cent = 1 + 2*Fx
-        c_cent = -Fx + Cx_cent
-        
-        up_x, um_x = np.maximum(uj, 0), np.minimum(uj, 0)
-        Cux_up = dt / (2 * dx)
-        a_up = -Fx - up_x * Cux_up
-        b_up = 1 + 2*Fx + (up_x - um_x) * Cux_up
-        c_up = -Fx + um_x * Cux_up
-        
-        a = np.where(mask_up_x[1:], a_up[1:], a_cent[1:])
-        b = np.where(mask_up_x, b_up, b_cent)
-        c = np.where(mask_up_x[:-1], c_up[:-1], c_cent[:-1])
-
-        # 2. Second membre d (Explicite Y Hybride + Source Boussinesq)
-        vj = v[j, 1:-1]
-        Pey_local = (np.abs(vj) * dy) / diff_coeff
-        
-        # Convection Y
-        Cy_cent = vj * dt / (4 * dy)
-        conv_y_cent = Cy_cent * (w[j+1, 1:-1] - w[j-1, 1:-1])
-        vp_y, vm_y = np.maximum(vj, 0), np.minimum(vj, 0)
-        Cuy_up = dt / (2 * dy)
-        conv_y_up = Cuy_up * (vp_y * (w[j, 1:-1] - w[j-1, 1:-1]) + vm_y * (w[j+1, 1:-1] - w[j, 1:-1]))
-        
-        conv_y = np.where(Pey_local >= 2, conv_y_up, conv_y_cent)
-        
-        d = w[j, 1:-1] + Fy * (w[j+1, 1:-1] - 2*w[j, 1:-1] + w[j-1, 1:-1]) - conv_y
-        
-        # Terme source (Boussinesq) : dT/dx
-        d += s_half * (T[j, 2:] - T[j, :-2]) / (2 * dx)
-
-        # 3. Injection Dirichlet (Thom sur parois verticales)
-        if Pex_local[0] >= 2:
-            d[0] -= a_up[0] * w_star[j, 0]
-        else:
-            d[0] -= a_cent[0] * w_star[j, 0]
-
-        if Pex_local[-1] >= 2:
-            d[-1] -= c_up[-1] * w_star[j, -1]
-        else:
-            d[-1] -= c_cent[-1] * w_star[j, -1]
-        
-        w_star[j, 1:-1] = solve_thomas(a, b, c, d)
-
-    # --- Étape 2 : Y-Implicite ---
-    # Conditions aux limites (Thom) pour parois horizontales (avec U0 en haut)
-    w_star[0, :] = -2 * psi[1, :] / dy**2
-    w_star[-1, :] = -2 * (psi[-2, :] + U0 * dy) / dy**2
+    # --- A. Matrices LHS (A, B, C) selon u ---
+    u_x = u[1:-1, 1:-1] 
+    Pex = np.abs(u_x) * dx / diff_coeff
+    mask = Pex >= 2
     
-    for i in range(1, Nx-1):
-        vi = v[1:-1, i]
-        Pey_local = (np.abs(vi) * dy) / diff_coeff
-        mask_up_y = Pey_local >= 2
-        
-        # 1. Matrice Y (Implicite)
-        Cy_cent = vi * dt / (4 * dy)
-        a_cent_y = -Fy - Cy_cent
-        b_cent_y = 1 + 2*Fy
-        c_cent_y = -Fy + Cy_cent
-        
-        vp_y, vm_y = np.maximum(vi, 0), np.minimum(vi, 0)
-        Cuy_up = dt / (2 * dy)
-        a_up_y = -Fy - vp_y * Cuy_up
-        b_up_y = 1 + 2*Fy + (vp_y - vm_y) * Cuy_up
-        c_up_y = -Fy + vm_y * Cuy_up
-        
-        a_y = np.where(mask_up_y[1:], a_up_y[1:], a_cent_y[1:])
-        b_y = np.where(mask_up_y, b_up_y, b_cent_y)
-        c_y = np.where(mask_up_y[:-1], c_up_y[:-1], c_cent_y[:-1])
-
-        # 2. Second membre d (Explicite X Hybride + Source)
-        ui = u[1:-1, i]
-        Pex_local_i = (np.abs(ui) * dx) / diff_coeff
-        
-        # Convection X
-        Cx_cent = ui * dt / (4 * dx)
-        conv_x_cent = Cx_cent * (w_star[1:-1, i+1] - w_star[1:-1, i-1])
-        up_x, um_x = np.maximum(ui, 0), np.minimum(ui, 0)
-        Cux_up = dt / (2 * dx)
-        conv_x_up = Cux_up * (up_x * (w_star[1:-1, i] - w_star[1:-1, i-1]) + um_x * (w_star[1:-1, i+1] - w_star[1:-1, i]))
-        
-        conv_x = np.where(Pex_local_i >= 2, conv_x_up, conv_x_cent)
-        
-        d_y = w_star[1:-1, i] + Fx * (w_star[1:-1, i+1] - 2*w_star[1:-1, i] + w_star[1:-1, i-1]) - conv_x
-        
-        # Ajout du terme source Boussinesq (dT/dx)
-        d_y += s_half * (T[1:-1, i+1] - T[1:-1, i-1]) / (2 * dx)
-
-        # 3. Injection Dirichlet (Thom sur parois horizontales)
-        if Pey_local[0] >= 2:
-            d_y[0] -= a_up_y[0] * w_star[0, i]
-        else:
-            d_y[0] -= a_cent_y[0] * w_star[0, i]
-
-        if Pey_local[-1] >= 2:
-            d_y[-1] -= c_up_y[-1] * w_star[-1, i]
-        else:
-            d_y[-1] -= c_cent_y[-1] * w_star[-1, i]
-
-        w_new[1:-1, i] = solve_thomas(a_y, b_y, c_y, d_y)
-
+    # Coefficients Centrés
+    Cx = u_x * dt / (4 * dx)
+    a_c, b_c, c_c = -Fx - Cx, 1 + 2*Fx, -Fx + Cx
+    
+    # Coefficients Upwind (si convection forte)
+    up, um = np.maximum(u_x, 0), np.minimum(u_x, 0)
+    Cux = dt / (2 * dx)
+    a_u = -Fx - up * Cux
+    b_u = 1 + 2*Fx + (up - um) * Cux
+    c_u = -Fx + um * Cux
+    
+    # Sélection Hybride
+    a = np.where(mask, a_u, a_c)
+    b = np.where(mask, b_u, b_c)
+    c = np.where(mask, c_u, c_c)
+    
+    # --- B. Second Membre RHS (d) selon v et T ---
+    # On utilise 'w' (temps n) pour l'explicite en Y
+    w_inner = w[1:-1, 1:-1]
+    d = w_inner.copy()
+    
+    # Diffusion Y (Explicite)
+    diff_y = Fy * (w[2:, 1:-1] - 2*w_inner + w[:-2, 1:-1])
+    
+    # Convection Y (Explicite)
+    v_y = v[1:-1, 1:-1]
+    Pey = np.abs(v_y) * dy / diff_coeff
+    mask_y = Pey >= 2
+    
+    Cy = v_y * dt / (4 * dy)
+    conv_y_c = Cy * (w[2:, 1:-1] - w[:-2, 1:-1]) # Centré
+    
+    vp, vm = np.maximum(v_y, 0), np.minimum(v_y, 0)
+    Cuy = dt / (2 * dy)
+    conv_y_u = Cuy * (vp*(w_inner - w[:-2, 1:-1]) + vm*(w[2:, 1:-1] - w_inner)) # Upwind
+    
+    conv_y = np.where(mask_y, conv_y_u, conv_y_c)
+    
+    # Terme Source Boussinesq (dT/dx) au temps n
+    dTdx = (T[1:-1, 2:] - T[1:-1, :-2]) / (2*dx)
+    source = s_half * dTdx
+    
+    # Assemblage RHS
+    d = d + diff_y - conv_y + source
+    
+    # Ajout des CL Dirichlet (qui sont dans w_star depuis le pré-calcul)
+    d[:, 0]  -= a[:, 0]  * w_star[1:-1, 0]
+    d[:, -1] -= c[:, -1] * w_star[1:-1, -1]
+    
+    # --- C. Résolution Thomas ---
+    # Le résultat EST w_star (intérieur)
+    w_star[1:-1, 1:-1] = solve_thomas_vectorized(a, b, c, d)
+    
+    
+    # ==========================================
+    # ÉTAPE 2 : Y-IMPLICITE (Calcul de w_new)
+    # ==========================================
+    # On utilise w_star (fraîchement calculé) pour faire l'explicite en X
+    # On transpose tout pour résoudre par colonnes
+    
+    w_trans = w_star.T       # (Nx, Ny)
+    w_new_trans = w_new.T    # On écrira dedans
+    u_trans = u.T
+    v_trans = v.T
+    T_trans = T.T
+    
+    # On met aussi à jour les CL transposées dans w_new_trans pour Thomas
+    # (Les CL Haut/Bas deviennent Gauche/Droite dans la transposée)
+    # w_star contient déjà les bonnes valeurs aux bords, on les copie dans w_new
+    w_new_trans[:, 0] = w_trans[:, 0]   # Bas
+    w_new_trans[:, -1] = w_trans[:, -1] # Haut
+    
+    # --- A. Matrices LHS (Y implicite devient X dans la transposée) ---
+    v_y = v_trans[1:-1, 1:-1]
+    Pey = np.abs(v_y) * dy / diff_coeff
+    mask_y = Pey >= 2
+    
+    Cy = v_y * dt / (4 * dy)
+    a_c, b_c, c_c = -Fy - Cy, 1 + 2*Fy, -Fy + Cy
+    
+    vp, vm = np.maximum(v_y, 0), np.minimum(v_y, 0)
+    Cuy = dt / (2 * dy)
+    a_u = -Fy - vp * Cuy
+    b_u = 1 + 2*Fy + (vp - vm) * Cuy
+    c_u = -Fy + vm * Cuy
+    
+    a = np.where(mask_y, a_u, a_c)
+    b = np.where(mask_y, b_u, b_c)
+    c = np.where(mask_y, c_u, c_c)
+    
+    # --- B. Second Membre RHS (Explicit X avec w_star) ---
+    w_star_inner_T = w_trans[1:-1, 1:-1]
+    d_y = w_star_inner_T.copy()
+    
+    # Diffusion X (Explicite sur w_star)
+    diff_x = Fx * (w_trans[2:, 1:-1] - 2*w_star_inner_T + w_trans[:-2, 1:-1])
+    
+    # Convection X (Explicite sur w_star)
+    u_x = u_trans[1:-1, 1:-1]
+    Pex = np.abs(u_x) * dx / diff_coeff
+    mask_x = Pex >= 2
+    
+    Cx = u_x * dt / (4 * dx)
+    conv_x_c = Cx * (w_trans[2:, 1:-1] - w_trans[:-2, 1:-1])
+    
+    up, um = np.maximum(u_x, 0), np.minimum(u_x, 0)
+    Cux = dt / (2 * dx)
+    conv_x_u = Cux * (up*(w_star_inner_T - w_trans[:-2, 1:-1]) + um*(w_trans[2:, 1:-1] - w_star_inner_T))
+    
+    conv_x = np.where(mask_x, conv_x_u, conv_x_c)
+    
+    # Source Boussinesq (dT/dx) - Attention dx est l'axe 0 dans la transposée
+    dTdx_trans = (T_trans[2:, 1:-1] - T_trans[:-2, 1:-1]) / (2*dx)
+    source = s_half * dTdx_trans
+    
+    # Assemblage
+    d_y = d_y + diff_x - conv_x + source
+    
+    # CL Dirichlet (depuis w_new_trans qui a les bords à jour)
+    d_y[:, 0]  -= a[:, 0]  * w_new_trans[1:-1, 0]
+    d_y[:, -1] -= c[:, -1] * w_new_trans[1:-1, -1]
+    
+    # --- C. Résolution Thomas ---
+    res_y = solve_thomas_vectorized(a, b, c, d_y)
+    
+    # Stockage dans w_new (transposé)
+    w_new_trans[1:-1, 1:-1] = res_y
+    
+    # Re-transposition finale vers w_new
+    # (Comme w_new_trans est une vue de w_new.T, w_new est déjà à jour, 
+    # mais pour être sûr de l'ordre mémoire :)
+    w_new[:, :] = w_new_trans.T
+    
     return w_new
