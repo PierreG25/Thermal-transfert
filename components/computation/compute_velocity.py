@@ -1,6 +1,6 @@
 import numpy as np
 
-def get_velocity(psi, dx, dy, U0, out_u=None, out_v=None):
+def get_velocity(psi, dx, dy, u_top, out_u=None, out_v=None):
     """
     Calcule les composantes de vitesse u, v à partir de psi.
     Args optionnels out_u, out_v : Tableaux existants pour éviter l'allocation mémoire.
@@ -24,7 +24,7 @@ def get_velocity(psi, dx, dy, U0, out_u=None, out_v=None):
     
     # --- Conditions aux Limites ---
     # Couvercle entraîné (Haut)
-    out_u[-1, :] = U0
+    out_u[-1, :] = u_top
     
     # Les autres parois sont immobiles (u=0, v=0) -> Déjà fait par .fill(0.0)
     

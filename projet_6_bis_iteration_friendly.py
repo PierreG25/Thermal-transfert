@@ -2,129 +2,105 @@ import numpy as np
 import time
 from IPython.display import clear_output
 
-# Import des modules de calcul (supposés être dans components/computation/)
-# Assurez-vous que ces fichiers contiennent les versions VECTORISÉES données précédemment.
+# Import des modules de calcul
 from components.computation.solve_psi import solve_psi_SOR
 from components.computation.solve_temperature import solve_adi_T
 from components.computation.solve_vorticity import solve_adi_w
 from components.computation.compute_velocity import get_velocity
 from components.computation.compute_nusselt import get_average_nusselt
 
-def global_resolution(nx, ny, Lx, Ly, dt_init, nu, Re, Ra, direction="+"):
+def global_resolution(nx, ny, dt_max, Re, Ra, direction="+"):
     """
-    Solveur principal optimisé (Mémoire & Vectorisation).
+    Solveur Adimensionné (u_lid = 1.0 ou -1.0).
+    L'argument 'nu' n'est pas utilisé pour le calcul (piloté par Re), 
+    il est gardé juste pour compatibilité avec tes anciens appels.
     """
-    # --- 1. Paramètres Géométriques & Physiques ---
-    dx = Lx / (nx - 1)
-    dy = Ly / (ny - 1)
+    # --- 1. Paramètres Adimensionnés ---
+    dx = 1 / (nx - 1)
+    dy = 1 / (ny - 1)
     Pr = 0.71
     
-    U0 = Re * nu / Lx
-    
-    if direction == '-':
-        U0 = -U0
+    u_lid = 1.0
+    if direction == '-': 
+        u_lid = -1.0
         
-    # Nombre de Richardson (Couplage Convection Naturelle / Forcée)
-    # Ri = Gr / Re^2
+    # Le nombre de Richardson dépend de Ra et Re
     Ri = Ra / (Pr * Re**2)
     
-    print(f"--- Initialisation ---")
+    print(f"--- Initialisation (Adimensionnée) ---")
     print(f"Grid: {nx}x{ny} | Re: {Re} | Ra: {Ra:.1e} | Ri: {Ri:.2f}")
-    print(f"U0: {U0:.4f} m/s | dx: {dx:.2e}")
+    print(f"Direction Paroi {np.sign(u_lid)}")
 
-    # --- 2. Allocation Mémoire (Buffers) ---
-    # On crée tous les tableaux MAINTENANT pour ne pas le faire dans la boucle (Gain vitesse)
-    
-    # Champs principaux
+    # --- 2. Allocation Mémoire ---
     T = np.zeros((ny, nx))
     w = np.zeros((ny, nx))
     psi = np.zeros((ny, nx))
-    u, v = get_velocity(psi, dx, dy, U0)    
+    
+    # On initialise la vitesse avec la bonne condition au bord (u_lid)
+    u, v = get_velocity(psi, dx, dy, u_lid)    
     T[:, 0] = 1.0 
     
-    # Buffers de travail pour ADI (évite allocation dynamique)
-    # T_new et w_new servent de stockage temporaire pour le pas n+1
-    T_buffer = {
-        'T_star': T.copy(), 
-        'T_new': T.copy()
-    }
-
-    w_buffer = {
-        'w_star': np.zeros((ny, nx)), 
-        'w_new': np.zeros((ny, nx))
-    }
+    # Buffers
+    T_buffer = {'T_star': T.copy(), 'T_new': T.copy()}
+    w_buffer = {'w_star': np.zeros((ny, nx)), 'w_new': np.zeros((ny, nx))}
 
     # --- 3. Paramètres Numériques ---
     alpha_sor = 1.725
     tol_sor = 1e-4
-    tol_steady = 5e-4
-    Nu_tol = 5e-2
     max_iter = 100000
     
-    dt = dt_init
-    target_cfl = 0.5
-    if Ra > 1e5: target_cfl = 0.3
-    
-    # Stockage résultats
-    img_dic = {'T': [], 'w': [], 'psi': [], 'u': [], 'v': []}
-    history = {'res_w': [], 'res_T': [], 'res_Nu': [], 'dt': [], 
-           'Nu_hot': [], 'Nu_cold': []}
-    
+    # CRITÈRES D'ARRÊT
+    tol_w_abs = 1e-4
+    tol_T_abs = 1e-4   
+    tol_Nu_abs = 1e-2   
 
+    tol_stagnation = 1e-2  
+    safety_threshold = 1e-3 
+    
+    window_size = 100 
+    hist_w, hist_T, hist_Nu = [], [], []
+
+    dt = dt_max
+    target_cfl = 0.5 if Ra <= 1e5 else 0.3
+    
+    img_dic = {'T': [], 'w': [], 'psi': [], 'u': [], 'v': []}
+    history = {'res_w': [], 'res_T': [], 'res_Nu': [], 'dt': [], 'Nu_hot': [], 'Nu_cold': []}
+    
     # --- 4. Boucle Temporelle ---
     start_time = time.time()
     print("Démarrage du calcul...")
     
     n = 0
+    stop_simu = False
     while n < max_iter:
         
-        # --- AJOUT : DÉBRIDAGE PROGRESSIF DU CFL ---
-        # Après 500 itérations, on augmente doucement le CFL cible jusqu'à 2.0
+        # CFL Dynamique
         if n > 500 and target_cfl < 2.0:
-            target_cfl = min(target_cfl * 1.02, 2.0)
-            
-        # A. Adaptative Time Stepping (Calcul standard)
+            target_cfl = min(target_cfl * 1.02, 2.0)     
         v_max = np.max(np.sqrt(u**2 + v**2)) + 1e-9
         dt_stability = target_cfl * min(dx, dy) / v_max
+        dt = min(dt * 1.05, dt_stability, dt_max)
         
-        # On ne dépasse pas dt_init (qui sert de plafond absolu)
-        dt = min(dt * 1.05, dt_stability, dt_init)        
-        # A. Adaptative Time Stepping (CFL)
-        # On calcule la vitesse max pour ajuster dt
-        # Vmax ne doit pas être 0 pour éviter division par zéro
-        v_max = np.max(np.sqrt(u**2 + v**2)) + 1e-9
-        
-        # CFL = V * dt / dx => dt_max = CFL * dx / V
-        dt_stability = target_cfl * min(dx, dy) / v_max
-        
-        # On lisse l'évolution de dt (ne pas changer trop brusquement)
-        # On ne dépasse pas dt_init (qui est le dt max souhaité par l'utilisateur)
-        dt = min(dt * 1.05, dt_stability, dt_init)
-        
+        # --- RÉSOLUTION ---
+        # Note : On passe bien u_lid (1.0 ou -1.0) aux fonctions
         T_computed = solve_adi_T(T, u, v, 1/(Re*Pr), dt, dx, dy, work_buffer=T_buffer)
-        
-        w_computed = solve_adi_w(w, T_computed, psi, u, v, 1/Re, Ri, dt, dx, dy, U0, work_buffer=w_buffer)
-        
+        w_computed = solve_adi_w(w, T_computed, psi, u, v, 1/Re, Ri, dt, dx, dy, u_lid, work_buffer=w_buffer)
         psi = solve_psi_SOR(psi, w_computed, dx, dy, alpha_sor, tol_sor)
+        get_velocity(psi, dx, dy, u_lid, out_u=u, out_v=v)
         
-        # Mise à jour "In-Place" dans u et v pour économiser mémoire
-        get_velocity(psi, dx, dy, U0, out_u=u, out_v=v)
-        
-        # C. Suivi Convergence (tous les 100 itérations pour gagner du temps CPU)
+        # --- CONTRÔLE (Toutes les 50 itérations) ---
         if n % 50 == 0:
-            # Calcul des résidus (différence relative normalisée)
             scale_w = np.max(np.abs(w_computed)) + 1e-6
             scale_T = np.max(np.abs(T_computed)) + 1e-6
-            
             res_w = np.max(np.abs(w_computed - w)) / scale_w
             res_T = np.max(np.abs(T_computed - T)) / scale_T
             
-            # Nusselt
             Nu_h, Nu_c = get_average_nusselt(T_computed, dx)
-            if abs(Nu_h) < 1e-9: Nu_h = 1e-9
-            res_Nu = abs(Nu_h - Nu_c) / abs(Nu_h)
+            res_Nu = abs(Nu_h - Nu_c) / (abs(Nu_h) + 1e-9)
             
-            # Stockage
+            if n % 500 == 0:
+                print(f"It {n:5d} | dt={dt:.1e} | Res_Nu={res_Nu:.1e} | Res_w={res_w:.1e} | Res_T={res_T:.1e}")
+
             history['res_w'].append(res_w)
             history['res_T'].append(res_T)
             history['res_Nu'].append(res_Nu)
@@ -132,29 +108,47 @@ def global_resolution(nx, ny, Lx, Ly, dt_init, nu, Re, Ra, direction="+"):
             history['Nu_hot'].append(Nu_h)
             history['Nu_cold'].append(Nu_c)
             
-            # Affichage console
-            if n % 500 == 0:
-                print(f"It {n:5d} | dt={dt:.1e} | Res_Nu={res_Nu:.1e} | Res_w={res_w:.1e} | Res_T={res_T:.1e} | Nu={abs(Nu_h):.3f}")
+            hist_w.append(res_w)
+            hist_T.append(res_T)
+            hist_Nu.append(res_Nu)
+            
+            if len(hist_w) > window_size:
+                hist_w.pop(0)
+                hist_T.pop(0)
+                hist_Nu.pop(0)
 
-            # Critère d'arrêt (Convergence Stationnaire)
-            # On demande que T et w soient stables, ET que le bilan énergétique (Nu) soit bon (<1%)
-            if n > 500 and res_w < tol_steady and res_T < tol_steady and res_Nu < Nu_tol:
-                print(f"\n=== CONVERGENCE ATTEINTE (It {n}) ===")
+            # --- CONDITION D'ARRÊT ---
+            mean_w = np.mean(hist_w)
+            mean_T = np.mean(hist_T)
+            mean_Nu = np.mean(hist_Nu)
+            
+            diff_rel_w = abs(res_w - mean_w) / (mean_w + 1e-12)
+            diff_rel_T = abs(res_T - mean_T) / (mean_T + 1e-12)
+            diff_rel_Nu = abs(res_Nu - mean_Nu) / (mean_Nu + 1e-12)
+            
+            w_ok = (res_w < tol_w_abs) or (diff_rel_w < tol_stagnation and res_w < safety_threshold)
+            T_ok = (res_T < tol_T_abs) or (diff_rel_T < tol_stagnation and res_T < safety_threshold)
+            Nu_ok = (res_Nu < tol_Nu_abs) or (diff_rel_Nu < tol_stagnation)
+            
+            if n >= 500 and len(hist_w) == window_size and w_ok and T_ok and Nu_ok :
+                stop_simu = True
+            
+            if stop_simu:
+                print(f"\n=== ARRÊT : It {n} ===")
+                print(f"Res_w: {res_w:.2e} | Res_T: {res_T:.2e} | Res_Nu (Balance): {res_Nu:.2e}")
                 print(f"Nu Moyen: {(abs(Nu_h)+abs(Nu_c))/2:.4f}")
-                print(f"Info Bilan Energie (Ecart H/C): {res_Nu*100:.1f}%") # Juste pour info                # Sauvegarde finale
+                
                 img_dic['T'].append(T_computed.copy())
                 img_dic['w'].append(w_computed.copy())
                 img_dic['psi'].append(psi.copy())
                 img_dic['u'].append(u.copy())
                 img_dic['v'].append(v.copy())
                 break
-        
-        # D. Mise à jour des états pour n+1
-        # Copie rapide des valeurs du buffer vers les tableaux principaux
+
+        # Mise à jour
         T[:] = T_computed[:]
         w[:] = w_computed[:]
         
-        # Sauvegarde périodique pour animation (tous les 2000 pas)
         if n % 2000 == 0:
             img_dic['T'].append(T.copy())
             img_dic['w'].append(w.copy())
@@ -162,12 +156,9 @@ def global_resolution(nx, ny, Lx, Ly, dt_init, nu, Re, Ra, direction="+"):
             
         n += 1
         
-    # --- 5. Finalisation ---
     total_time = time.time() - start_time
     print(f"Calcul terminé en {total_time:.2f} s ({n} itérations)")
-    
-    # Ajout des historiques au dictionnaire de retour
     img_dic.update(history)
     
-    # On retourne U0 (calculé) et le dictionnaire de résultats
-    return U0, img_dic
+    # On renvoie u_lid (qui vaut +/- 1) au lieu de l'ancien U0
+    return img_dic
