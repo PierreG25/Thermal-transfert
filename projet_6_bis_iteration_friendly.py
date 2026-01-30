@@ -19,12 +19,8 @@ def global_resolution(nx, ny, Lx, Ly, dt_init, nu, Re, Ra, direction="+"):
     dy = Ly / (ny - 1)
     Pr = 0.71
     
-    # Vitesse caractéristique U0 (Basée sur Re = U0 * L / nu)
     U0 = Re * nu / Lx
     
-    # Gestion de la direction du couvercle
-    # "+" : Aiding Flow (Si gauche chaud, droite froid -> Rotation horaire naturelle)
-    # "-" : Opposing Flow (Couvercle va à gauche, contre la convection naturelle)
     if direction == '-':
         U0 = -U0
         
@@ -43,21 +39,15 @@ def global_resolution(nx, ny, Lx, Ly, dt_init, nu, Re, Ra, direction="+"):
     T = np.zeros((ny, nx))
     w = np.zeros((ny, nx))
     psi = np.zeros((ny, nx))
-    u = np.zeros((ny, nx))
-    v = np.zeros((ny, nx))
-    
-    # Condition Initiale Température (Paroi Chaude à Gauche)
+    u, v = get_velocity(psi, dx, dy, U0)    
     T[:, 0] = 1.0 
     
     # Buffers de travail pour ADI (évite allocation dynamique)
     # T_new et w_new servent de stockage temporaire pour le pas n+1
     T_buffer = {
-        'T_star': np.zeros((ny, nx)), 
-        'T_new': np.zeros((ny, nx))
+        'T_star': T.copy(), 
+        'T_new': T.copy()
     }
-    # Important : Initialiser les buffers avec l'état initial
-    T_buffer['T_new'][:, 0] = 1.0 
-    T_buffer['T_star'][:, 0] = 1.0
 
     w_buffer = {
         'w_star': np.zeros((ny, nx)), 
@@ -65,16 +55,15 @@ def global_resolution(nx, ny, Lx, Ly, dt_init, nu, Re, Ra, direction="+"):
     }
 
     # --- 3. Paramètres Numériques ---
-    alpha_sor = 1.8         # Relaxation SOR (1.7 à 1.9 est optimal pour nx=51-100)
-    tol_sor = 1e-4          # Précision Poisson
-    tol_steady = 1e-5       # Convergence stationnaire globale
-    tol_Nu = 5e-3
-    max_iter = 100000       # Sécurité
+    alpha_sor = 1.725
+    tol_sor = 1e-4
+    tol_steady = 5e-4
+    Nu_tol = 5e-2
+    max_iter = 100000
     
-    # Gestion du Pas de Temps (Adaptatif)
-    dt = dt_init            # Valeur courante
-    target_cfl = 0.5        # CFL cible (prudent au début)
-    if Ra > 1e5: target_cfl = 0.3 # Plus prudent si très turbulent
+    dt = dt_init
+    target_cfl = 0.5
+    if Ra > 1e5: target_cfl = 0.3
     
     # Stockage résultats
     img_dic = {'T': [], 'w': [], 'psi': [], 'u': [], 'v': []}
@@ -149,7 +138,7 @@ def global_resolution(nx, ny, Lx, Ly, dt_init, nu, Re, Ra, direction="+"):
 
             # Critère d'arrêt (Convergence Stationnaire)
             # On demande que T et w soient stables, ET que le bilan énergétique (Nu) soit bon (<1%)
-            if n > 500 and res_w < 1e-5 and res_T < 1e-5:
+            if n > 500 and res_w < tol_steady and res_T < tol_steady and res_Nu < Nu_tol:
                 print(f"\n=== CONVERGENCE ATTEINTE (It {n}) ===")
                 print(f"Nu Moyen: {(abs(Nu_h)+abs(Nu_c))/2:.4f}")
                 print(f"Info Bilan Energie (Ecart H/C): {res_Nu*100:.1f}%") # Juste pour info                # Sauvegarde finale
