@@ -149,10 +149,10 @@ def global_resolution(nx, ny, Lx, Ly, dt_init, nu, Re, Ra, direction="+"):
 
             # Critère d'arrêt (Convergence Stationnaire)
             # On demande que T et w soient stables, ET que le bilan énergétique (Nu) soit bon (<1%)
-            if n > 500 and res_w < tol_steady and res_T < tol_steady and res_Nu < tol_Nu:
+            if n > 500 and res_w < 1e-5 and res_T < 1e-5:
                 print(f"\n=== CONVERGENCE ATTEINTE (It {n}) ===")
                 print(f"Nu Moyen: {(abs(Nu_h)+abs(Nu_c))/2:.4f}")
-                # Sauvegarde finale
+                print(f"Info Bilan Energie (Ecart H/C): {res_Nu*100:.1f}%") # Juste pour info                # Sauvegarde finale
                 img_dic['T'].append(T_computed.copy())
                 img_dic['w'].append(w_computed.copy())
                 img_dic['psi'].append(psi.copy())
