@@ -2,15 +2,8 @@ import numpy as np
 from components.computation.thomas_algorithm import solve_thomas_vectorized
 
 def solve_adi_w(w, T, psi, u, v, diff_coeff, Ri, dt, dx, dy, U0, work_buffer=None):
-    """
-    Résolution ADI de la Vorticité (w).
-    Structure symétrique à la température :
-    - Étape 1 : w -> w_star (Implicite X)
-    - Étape 2 : w_star -> w_new (Implicite Y)
-    """
-    Ny, Nx = w.shape
+
     
-    # --- 0. GESTION MÉMOIRE & CONSTANTES ---
     if work_buffer is not None:
         w_new = work_buffer['w_new']
         w_star = work_buffer['w_star']
@@ -22,10 +15,9 @@ def solve_adi_w(w, T, psi, u, v, diff_coeff, Ri, dt, dx, dy, U0, work_buffer=Non
     Fx = (diff_coeff * dt) / (2 * dx**2)
     Fy = (diff_coeff * dt) / (2 * dy**2)
     s_half = (dt / 2.0) * Ri  # Ri = Ra/(Pr*Re^2) pour le terme source thermique
-    r_wall = 0.5 # Facteur de relaxation aux parois (Vital pour stabilité)
+    r_wall = 1.0 # Facteur de relaxation aux parois (Vital pour stabilité)
 
-    # --- 1. PRÉ-CALCUL DES BORDS (THOM avec RELAXATION) ---
-    # On met à jour les murs dans w_star directement pour s'en servir comme Condition Limite (CL)
+    # --- 1. PRÉ-CALCUL DES BORDS  ---
     # Mur Gauche/Droite
     w_star[:, 0]  = (1-r_wall)*w[:, 0]  + r_wall*(-2 * psi[:, 1] / dx**2)
     w_star[:, -1] = (1-r_wall)*w[:, -1] + r_wall*(-2 * psi[:, -2] / dx**2)
@@ -175,9 +167,6 @@ def solve_adi_w(w, T, psi, u, v, diff_coeff, Ri, dt, dx, dy, U0, work_buffer=Non
     # Stockage dans w_new (transposé)
     w_new_trans[1:-1, 1:-1] = res_y
     
-    # Re-transposition finale vers w_new
-    # (Comme w_new_trans est une vue de w_new.T, w_new est déjà à jour, 
-    # mais pour être sûr de l'ordre mémoire :)
     w_new[:, :] = w_new_trans.T
     
     return w_new
