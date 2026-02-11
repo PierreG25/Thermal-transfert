@@ -42,11 +42,11 @@ def global_resolution(nx, ny, dt_max, Re, Ra, direction="+", depth=0):
     # --- 3. Paramètres Numériques ---
     alpha_sor = 1.725
     tol_sor = 1e-4
-    max_iter = 40000
+    max_iter = 100000
     
     # CRITÈRES D'ARRÊT (Absolus)
-    tol_w_abs = 1e-4
-    tol_T_abs = 1e-4  
+    tol_w_abs = 1e-2
+    tol_T_abs = 1e-2
     tol_Nu_abs = 5e-3
 
     Ri = Ra/(Pr*Re**2)
@@ -56,12 +56,12 @@ def global_resolution(nx, ny, dt_max, Re, Ra, direction="+", depth=0):
 
     # CRITÈRES DE STAGNATION (Plateau)
     tol_plateau = 2e-2
-    window_size = 40   # Fenêtre pour la moyenne glissante
+    window_size = 60   # Fenêtre pour la moyenne glissante
     
     hist_w, hist_T, hist_Nu = [], [], []
 
     dt = dt_max
-    target_cfl = 0.5
+    target_cfl = 0.1
     
     img_dic = {'T': [], 'w': [], 'psi': []}
     history = {'res_w': [], 'res_T': [], 'res_Nu': [], 'dt': [], 'Nu_hot': [], 'Nu_cold': []}
@@ -78,10 +78,10 @@ def global_resolution(nx, ny, dt_max, Re, Ra, direction="+", depth=0):
         
         # CFL Dynamique
         if n > 500 and target_cfl < 2.0:
-            target_cfl = min(target_cfl * 1.01, 2.0)     
+            target_cfl = min(target_cfl * 1.005, 2.0)     
         v_max = np.max(np.sqrt(u**2 + v**2)) + 1e-9
         dt_stability = target_cfl * min(dx, dy) / v_max
-        dt = min(dt * 1.01, dt_stability, dt_max)
+        dt = min(dt * 1.005, dt_stability, dt_max)
         
         # --- RÉSOLUTION ---
         T_computed = solve_adi_T(T, u, v, 1/(Re*Pr), dt, dx, dy, work_buffer=T_buffer)
@@ -107,7 +107,6 @@ def global_resolution(nx, ny, dt_max, Re, Ra, direction="+", depth=0):
             history['res_w'].append(res_w)
             history['res_T'].append(res_T)
             history['res_Nu'].append(res_Nu)
-            history['dt'].append(dt)
             history['Nu_hot'].append(Nu_h)
             history['Nu_cold'].append(Nu_c)
 
@@ -157,7 +156,7 @@ def global_resolution(nx, ny, dt_max, Re, Ra, direction="+", depth=0):
                 # On arrête si TOUT le monde est content (soit petit, soit stable)
                 w_ok = w_small or w_plat
                 T_ok = T_small or T_plat
-                Nu_ok = Nu_small or Nu_plat
+                Nu_ok = Nu_small or (Nu_plat and res_Nu < 0.1)
                 
                 if w_ok and T_ok and Nu_ok:
                     print(f"\n=== CONVERGENCE ATTEINTE : It {n} ===")
