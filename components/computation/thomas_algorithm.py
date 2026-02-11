@@ -14,8 +14,6 @@ def solve_thomas_vectorized(a, b, c, d):
     """
     M, N = d.shape
     
-    # Copies pour ne pas modifier les originaux
-    # On utilise float64 pour la précision
     ac = a.copy()
     bc = b.copy()
     cc = c.copy()
@@ -23,10 +21,8 @@ def solve_thomas_vectorized(a, b, c, d):
     
     # 1. Descente (Forward Elimination) - Vectorisée sur M
     for i in range(1, N):
-        # Calcul du multiplicateur pour toutes les lignes 'M' d'un coup
         m = ac[:, i] / bc[:, i-1]
         
-        # Mise à jour
         bc[:, i] = bc[:, i] - m * cc[:, i-1]
         dc[:, i] = dc[:, i] - m * dc[:, i-1]
         

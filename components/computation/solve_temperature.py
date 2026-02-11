@@ -2,9 +2,8 @@ import numpy as np
 from components.computation.thomas_algorithm import solve_thomas_vectorized
 
 def solve_adi_T(T, u, v, diff_coeff, dt, dx, dy, work_buffer=None):
-    """Version vectorisée optimisée de ADI Température"""
-
-# --- GESTION MÉMOIRE ---
+    
+    # --- 1. Initialisation ---
     if work_buffer is not None:
         T_new = work_buffer['T_new']
         T_star = work_buffer['T_star']
@@ -12,101 +11,94 @@ def solve_adi_T(T, u, v, diff_coeff, dt, dx, dy, work_buffer=None):
         T_new = np.zeros_like(T)
         T_star = np.zeros_like(T)
 
-    T_star[:] = T[:] 
-    
-    # Coefficients constants
+    # Paramètres physiques
     Fx = (diff_coeff * dt) / (2 * dx**2)
-    Fy = (diff_coeff * dt) / (2 * dy**2)    
+    Fy = (diff_coeff * dt) / (2 * dy**2)
+    
+    # =================================================================
+    # ÉTAPE 0 : BCs DIRICHLET (Gauche/Droite)
+    # =================================================================
+    T_star[:, 0]  = T[:, 0]
+    T_star[:, -1] = T[:, -1]
+    T_new[:, 0]   = T[:, 0]
+    T_new[:, -1]  = T[:, -1]
 
-    # ===================================================
-    # ÉTAPE 1 : X-Implicite
-    # ===================================================
-    # On travaille sur l'intérieur [1:-1]
+    # ==========================================
+    # ÉTAPE 1 : X-IMPLICITE (Résolution lignes horizontales)
+    # ==========================================
     
-    u_x = u[:, 1:-1] 
+    # --- Matrices LHS (A, B, C) ---
+    u_x = u[:, 1:-1] # (Ny, Nx-2)
     
-    # Nombre de Peclet local (Ny, Nx-2)
     Pex = np.abs(u_x) * dx / diff_coeff
     mask = Pex >= 2
     
-    # Coefficients Schéma Centré (matrices pleines (Ny, Nx-2))
     Cx = u_x * dt / (4 * dx)
-    a_c = -Fx - Cx
-    b_c = 1 + 2*Fx
-    c_c = -Fx + Cx
     
-    # Coefficients Schéma Upwind
+    # Coefficients Hybrides
+    a_c, b_c, c_c = -Fx - Cx, 1 + 2*Fx, -Fx + Cx
+    
     up, um = np.maximum(u_x, 0), np.minimum(u_x, 0)
     Cux = dt / (2 * dx)
     a_u = -Fx - up * Cux
     b_u = 1 + 2*Fx + (up - um) * Cux
     c_u = -Fx + um * Cux
     
-    # Sélection (Hybride)
     a = np.where(mask, a_u, a_c)
     b = np.where(mask, b_u, b_c)
     c = np.where(mask, c_u, c_c)
     
-    # 2. Second membre d (Explicite en Y)
-    d = T[:, 1:-1].copy()
+    # --- Second membre RHS (d) ---
+    d = T[:, 1:-1].copy() # (Ny, Nx-2)
     
+    # Diffusion Y
     diff_y = Fy * (T[2:, 1:-1] - 2*T[1:-1, 1:-1] + T[:-2, 1:-1])
     
     # Convection Y
-    v_y = v[1:-1, 1:-1] # Vitesse verticale intérieure
+    v_y = v[1:-1, 1:-1]
     Pey = np.abs(v_y) * dy / diff_coeff
     mask_y = Pey >= 2
     
-    # Centré Y
     Cy = v_y * dt / (4 * dy)
     conv_y_c = Cy * (T[2:, 1:-1] - T[:-2, 1:-1])
     
-    # Upwind Y
     vp, vm = np.maximum(v_y, 0), np.minimum(v_y, 0)
     Cuy = dt / (2 * dy)
-    conv_y_u = Cuy * (vp * (T[1:-1, 1:-1] - T[:-2, 1:-1]) + vm * (T[2:, 1:-1] - T[1:-1, 1:-1]))
+    conv_y_u = Cuy * (vp*(T[1:-1, 1:-1] - T[:-2, 1:-1]) + vm*(T[2:, 1:-1] - T[1:-1, 1:-1]))
     
     conv_y = np.where(mask_y, conv_y_u, conv_y_c)
     
-    # Application sur d
+    # Update intérieur de d
     d[1:-1, :] = d[1:-1, :] + diff_y - conv_y
     
-    # Maille fictive
-    d[0, :]  = T[0, 1:-1]  + Fy*(2*T[1, 1:-1] - 2*T[0, 1:-1])
-    d[-1, :] = T[-1, 1:-1] + Fy*(2*T[-2, 1:-1] - 2*T[-1, 1:-1])
+    # Injection CL Neumann
+    d[0, :]  = T[0, 1:-1]  + Fy*(2*T[1, 1:-1] - 2*T[0, 1:-1])   # Bas
+    d[-1, :] = T[-1, 1:-1] + Fy*(2*T[-2, 1:-1] - 2*T[-1, 1:-1]) # Haut
     
-    # 3. Injection Conditions Limites X (Dirichlet T_star)
-    d[:, 0]  -= a[:, 0] * T[:, 0] 
-    d[:, -1] -= c[:, -1] * T[:, -1]
+    # Injection CL Dirichlet
+    d[:, 0]  -= a[:, 0]  * T_star[:, 0]
+    d[:, -1] -= c[:, -1] * T_star[:, -1]
     
-    # 4. Résolution Thomas 
-    res = solve_thomas_vectorized(a, b, c, d)
-    
-    T_star[:, 0] = T[:, 0]    # BC Gauche
-    T_star[:, -1] = T[:, -1]  # BC Droite
-    T_star[:, 1:-1] = res     # Intérieur calculé
+    # Résolution
+    T_star[:, 1:-1] = solve_thomas_vectorized(a, b, c, d)
     
     
-    # ===================================================
-    # ÉTAPE 2 : Y-Implicite (Résolution par colonnes)
-    # ===================================================
+    # ==========================================
+    # ÉTAPE 2 : Y-IMPLICITE (Résolution colonnes verticales)
+    # ==========================================
     
-    T_trans = T_star.T       # (Nx, Ny)
-    u_trans = u.T            # (Nx, Ny)
-    v_trans = v.T            # (Nx, Ny)
+    T_trans = T_star.T
+    u_trans = u.T
+    v_trans = v.T
     
-    # On travaille sur l'intérieur Y (donc indices 1:-1 dans la version transposée)
-    v_y = v_trans[:, 1:-1]
+    # --- Matrices LHS ---
+    v_y = v_trans[1:-1, :]
     
-    # Peclet Y
     Pey = np.abs(v_y) * dy / diff_coeff
     mask_y = Pey >= 2
     
-    # Coefficients Y (Implicites)
     Cy = v_y * dt / (4 * dy)
-    a_c = -Fy - Cy
-    b_c = 1 + 2*Fy
-    c_c = -Fy + Cy
+    a_c, b_c, c_c = -Fy - Cy, 1 + 2*Fy, -Fy + Cy
     
     vp, vm = np.maximum(v_y, 0), np.minimum(v_y, 0)
     Cuy = dt / (2 * dy)
@@ -115,47 +107,43 @@ def solve_adi_T(T, u, v, diff_coeff, dt, dx, dy, work_buffer=None):
     c_u = -Fy + vm * Cuy
     
     a = np.where(mask_y, a_u, a_c)
-    b = np.where(mask_y, b_u, b_c)
+    b = np.where(mask_y, b_u, b_c) 
     c = np.where(mask_y, c_u, c_c)
     
-    # Maille fictive
+    # --- Condition flux nul par maille fictive ---
     c[:, 0]  += a[:, 0]
     a[:, -1] += c[:, -1]
     
-    d_y = T_trans[:, 1:-1].copy()
-
-
-    diff_x = Fx * (T_trans[2:, 1:-1] - 2*T_trans[1:-1, 1:-1] + T_trans[:-2, 1:-1])
+    # --- RHS ---
+    d_final = T_trans[1:-1, :].copy()
     
-    u_x = u_trans[1:-1, 1:-1]
+    # Diffusion X
+    diff_x = Fx * (T_trans[2:, :] - 2*T_trans[1:-1, :] + T_trans[:-2, :])
+    
+    # Convection X
+    u_x = u_trans[1:-1, :]
     Pex = np.abs(u_x) * dx / diff_coeff
     mask_x = Pex >= 2
     
     Cx = u_x * dt / (4 * dx)
-    conv_x_c = Cx * (T_trans[2:, 1:-1] - T_trans[:-2, 1:-1])
+    conv_x_c = Cx * (T_trans[2:, :] - T_trans[:-2, :])
     
     up, um = np.maximum(u_x, 0), np.minimum(u_x, 0)
     Cux = dt / (2 * dx)
-    conv_x_u = Cux * (up*(T_trans[1:-1, 1:-1] - T_trans[:-2, 1:-1]) + um*(T_trans[2:, 1:-1] - T_trans[1:-1, 1:-1]))
+    conv_x_u = Cux * (up*(T_trans[1:-1, :] - T_trans[:-2, :]) + um*(T_trans[2:, :] - T_trans[1:-1, :]))
     
     conv_x = np.where(mask_x, conv_x_u, conv_x_c)
-    d_y[1:-1, :] = d_y[1:-1, :] + diff_x - conv_x
     
+    # Mise à jour du RHS
+    d_final[:, :] = d_final[:, :] + diff_x - conv_x
     
-    # Restriction aux i intérieurs pour la résolution
-    a_s = a[1:-1, :]
-    b_s = b[1:-1, :]
-    c_s = c[1:-1, :]
-    d_s = d_y[1:-1, :]
+    # Résolution
+    res_y = solve_thomas_vectorized(a, b, c, d_final)
     
-    # Résolution vectorisée
-    res_y = solve_thomas_vectorized(a_s, b_s, c_s, d_s) # (Nx-2, Ny-2)
-    
-    # Reconstitution T_new (Transposé)
+    # Reconstitution T_new
     T_new_trans = T_trans.copy()
-    T_new_trans[1:-1, 1:-1] = res_y
+    T_new_trans[1:-1, :] = res_y 
     
-    # Transposition inverse
-    T_new = T_new_trans.T
+    T_new[:, :] = T_new_trans.T
     
     return T_new

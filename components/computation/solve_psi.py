@@ -7,19 +7,12 @@ def solve_psi_SOR(psi, w, dx, dy, alpha_sor, tol):
     """
     Ny, Nx = psi.shape
     
-    # --- 1. Pré-calcul des constantes physiques ---
-    beta = dx / dy
-    beta_sq = beta**2
-    
-    # Le dénominateur commun de l'algo SOR
-    # Formule : Psi_new = (1-w)Psi_old + w * (Voisins + Source) / Denom
+    # --- Pré-calcul des constantes physiques ---
+    beta_sq = (dx/dy)**2
     denom = 2 * (1 + beta_sq)
-    inv_denom = 1.0 / denom
-    
-    # Terme source (w * dx^2) pré-calculé pour ne pas le refaire 1000 fois
     source_term_grid = w * dx**2
 
-    # --- 2. Fonction de mise à jour locale (Closure) ---
+    # --- Fonction de mise à jour locale ---
     def compute_sor_block(psi_center, psi_left, psi_right, psi_top, psi_bottom, source_block):
         """
         Applique la formule SOR sur un bloc de la grille.
@@ -33,7 +26,7 @@ def solve_psi_SOR(psi, w, dx, dy, alpha_sor, tol):
         
         # Formule de Gauss-Seidel avec relaxation (alpha_sor)
         # Target = (Somme_Voisins + Source) / Coeff_Central
-        target = (sum_x + sum_y + source_block) * inv_denom
+        target = (sum_x + sum_y + source_block) / denom
         
         # Combinaison linéaire : (1 - alpha) * Old + alpha * Target
         return (1 - alpha_sor) * psi_center + alpha_sor * target
