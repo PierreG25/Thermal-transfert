@@ -17,7 +17,7 @@ def solve_adi_w(w, T, psi, u, v, diff_coeff, Ri, dt, dx, dy, U0, work_buffer=Non
     s_half = (dt / 2.0) * Ri 
 
     # =================================================================
-    # ÉTAPE 0 : CONDITIONS LIMITES
+    # ÉTAPE 0 : CONDITIONS LIMITES DIRICHLET
     # =================================================================
     
     w_wall_left  = -2 * psi[:, 1]  / dx**2
